@@ -12,12 +12,89 @@ servers:
     description: Local development
 
 tags:
+  - name: projects
+    description: Group markdown into projects; ingest/search are scoped per project
   - name: markdowns
     description: Ingest and inspect markdown documents
   - name: search
     description: Semantic similarity search over chunks
 
 paths:
+  /api/projects/:
+    get:
+      tags: [projects]
+      summary: List projects
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated list of projects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items: { $ref: '#/components/schemas/Project' }
+    post:
+      tags: [projects]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/projects/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [projects]
+      summary: Retrieve a project
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [projects]
+      summary: Update a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectCreate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [projects]
+      summary: Delete a project (cascades to its markdowns and chunks)
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/markdowns/:
     get:
       tags: [markdowns]
@@ -68,12 +145,16 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required: [file, project]
               properties:
                 file:
                   type: string
                   format: binary
                   description: A UTF-8 encoded .md file
+                project:
+                  type: string
+                  format: uuid
+                  description: Project the markdown belongs to
       responses:
         '202':
           description: Accepted; embedding enqueued
@@ -155,6 +236,14 @@ components:
       schema:
         type: string
         format: uuid
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      description: Project UUID
+      schema:
+        type: string
+        format: uuid
     Page:
       name: page
       in: query
@@ -180,6 +269,34 @@ components:
           schema: { $ref: '#/components/schemas/FieldError' }
 
   schemas:
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        description:
+          type: string
+        markdown_count:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    ProjectCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
     Markdown:
       type: object
       properties:
@@ -187,6 +304,9 @@ components:
           type: string
           format: uuid
           readOnly: true
+        project:
+          type: string
+          format: uuid
         title:
           type: string
         text:
@@ -208,8 +328,11 @@ components:
 
     MarkdownCreate:
       type: object
-      required: [text]
+      required: [project, text]
       properties:
+        project:
+          type: string
+          format: uuid
         title:
           type: string
         text:
@@ -225,10 +348,14 @@ components:
 
     SearchRequest:
       type: object
-      required: [query]
+      required: [query, project]
       properties:
         query:
           type: string
+        project:
+          type: string
+          format: uuid
+          description: Only chunks in this project are searched
         top_k:
           type: integer
           default: 5
