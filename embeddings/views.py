@@ -7,14 +7,20 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .embedder import embed_texts
-from .models import Chunk, Markdown
+from .models import Chunk, Markdown, Project
 from .serializers import (
     ChunkSerializer,
     MarkdownSerializer,
+    ProjectSerializer,
     SearchRequestSerializer,
     SearchResultSerializer,
 )
 from .tasks import embed_markdown
+
+
+class ProjectViewSet(viewsets.ModelViewSet):
+    queryset = Project.objects.all()
+    serializer_class = ProjectSerializer
 
 
 class MarkdownViewSet(
@@ -52,9 +58,16 @@ class MarkdownViewSet(
         except UnicodeDecodeError:
             raise ValidationError({"file": "File must be UTF-8 encoded text."})
 
-        markdown = Markdown.objects.create(title=upload.name, text=text)
+        serializer = self.get_serializer(
+            data={
+                "project": request.data.get("project"),
+                "title": upload.name,
+                "text": text,
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+        markdown = serializer.save()
         embed_markdown.delay(str(markdown.id))
-        serializer = self.get_serializer(markdown)
         return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=["get"])
@@ -71,12 +84,15 @@ class SearchView(APIView):
         request_serializer = SearchRequestSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         query = request_serializer.validated_data["query"]
+        project = request_serializer.validated_data["project"]
         top_k = request_serializer.validated_data["top_k"]
 
         query_vector = embed_texts([query])[0]
-        results = Chunk.objects.annotate(
-            distance=CosineDistance("embedding", query_vector)
-        ).order_by("distance")[:top_k]
+        results = (
+            Chunk.objects.filter(markdown__project=project)
+            .annotate(distance=CosineDistance("embedding", query_vector))
+            .order_by("distance")[:top_k]
+        )
 
         data = [
             {
@@ -88,3 +104,9 @@ class SearchView(APIView):
             for chunk in results
         ]
         return Response(SearchResultSerializer(data, many=True).data)
+
+
+class ClusterView(APIView):
+    def post(self, request):
+        # TODO: cluster all stored chunk embeddings and return important topics
+        pass

@@ -5,6 +5,16 @@ from django.db import models
 from pgvector.django import VectorField
 
 
+class Project(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, unique=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Markdown(models.Model):
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -13,6 +23,9 @@ class Markdown(models.Model):
         FAILED = "FAILED", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project, related_name="markdowns", on_delete=models.CASCADE
+    )
     title = models.CharField(max_length=255, blank=True)
     text = models.TextField()
     status = models.CharField(
