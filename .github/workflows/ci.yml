@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Stage 1 — verify the docker-compose services are valid and buildable/pullable.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose config
+        run: docker compose config
+
+      - name: Build docker services
+        run: docker compose build
+
+      - name: Pull service images
+        run: docker compose pull
+
+  # Stage 2 — runs only if stage 1 passed. Tests API endpoints against the
+  # containerized Postgres (pgvector) + Redis started via docker compose.
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+
+    env:
+      SECRET_KEY: ci-secret
+      DEBUG: "False"
+      DATABASE_URL: postgres://vec:vec@localhost:5432/vec
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Check formatting (black)
+        run: |
+          pip install black
+          black --check --diff .
+
+      - name: Start database + redis
+        run: docker compose up -d --wait postgres redis
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch so sentence-transformers does not pull multi-GB CUDA wheels.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Check migrations are up to date
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run API endpoint tests
+        run: python manage.py test --verbosity 2
+
+      - name: Tear down services
+        if: always()
+        run: docker compose down

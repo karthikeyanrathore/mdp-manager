@@ -111,4 +111,4 @@ python manage.py test
 - Embedding dimension (384) is pinned to `all-MiniLM-L6-v2`. Changing the model
   (`EMBEDDING_MODEL_NAME`) means a new migration + re-embedding existing chunks.
 - v1 accepts raw text only — no auth, file upload, or PDF parsing.
-# markdown-manager
+
