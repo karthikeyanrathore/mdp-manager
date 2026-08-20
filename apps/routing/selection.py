@@ -31,19 +31,21 @@ Based on your analysis, provide your response in the following JSON formats if y
 {"route": "route_name"} 
 """
 
-from transformers import AutoModelForCausalLM , AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from apps.routing.serializers import PolicySerializer
 from rest_framework.exceptions import NotFound
 from .models import RoutingPolicy
 import json
 
-def format_prompt(route_config,  conversation):
+
+def format_prompt(route_config, conversation):
     return (
         TASK_INSTRUCTION.format(
             routes=json.dumps(route_config), conversation=json.dumps(conversation)
         )
         + FORMAT_PROMPT
     )
+
 
 def init_ArchRouter():
     model_name = "katanemo/Arch-Router-1.5B"
@@ -67,11 +69,13 @@ def select_policy(statement, policies):
     # policies_d = []
     # for policy in policies:
     #     print(policy.description)
-    _poli = (PolicySerializer(policies, many=True).data)
+    _poli = PolicySerializer(policies, many=True).data
     route_prompt = format_prompt(_poli, st)
-    model, tokenizer = init_ArchRouter() 
+    model, tokenizer = init_ArchRouter()
     messages = [{"role": "user", "content": route_prompt}]
-    input_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(model.device)
+    input_ids = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, return_tensors="pt"
+    ).to(model.device)
 
     # inference is slow!!
     generate_ids = model.generate(input_ids=input_ids, max_new_tokens=32768)
@@ -85,4 +89,4 @@ def select_policy(statement, policies):
         raise NotFound("Routing Policy not found for statment.")
     policy_name = res["route"]
     policy = RoutingPolicy.objects.filter(name=policy_name)[0]
-    return policy 
+    return policy
