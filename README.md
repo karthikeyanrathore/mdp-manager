@@ -1,4 +1,4 @@
-# markdown-manager
+# mdp-manager
 
 A Django REST Framework service that ingests text, embeds each document with a
 local model, and stores the vectors in Postgres (`pgvector`). Embedding runs
