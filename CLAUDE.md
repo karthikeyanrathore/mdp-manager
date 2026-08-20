@@ -101,11 +101,22 @@ Ingest is scoped by project and requires a `project`.
 
 **Markdown → policy**: `GET /api/markdowns/{id}/routing-policy/` (an `@action` on
 `MarkdownViewSet`) resolves the markdown's project and returns **one** policy —
-a single object, not a list. There is no markdown→policy FK, so which of the
-project's policies applies is decided by `select_policy`
-(`apps/routing/selection.py`). That function is the only place the rule lives;
-its current body is a **placeholder** (newest policy wins) awaiting the real
-criteria. 404 if the markdown is unknown or its project has no policies.
+a single object (`PolicySerializer`: `name` + `description`), not a list. There
+is no markdown→policy FK; which policy applies is decided by `select_policy`
+(`apps/routing/selection.py`), which prompts a **local LLM**
+(`katanemo/Arch-Router-1.5B` via `transformers`) with the markdown text and the
+project's policy descriptions, and parses a `{"route": "<name>"}` reply. 404 if
+the markdown is unknown, its project has no policies, or the router answers
+`other`.
+
+- **Never let tests reach the router.** `apps/md/tests.py` patches
+  `apps.md.views.select_policy` with `_fake_select_policy` for the whole
+  `MarkdownRoutingPolicyTests` class — the real one downloads a 1.5 B model and
+  runs inference. Same rule as `embed_texts`; mock at the `apps.md.views`
+  boundary.
+- `transformers` is imported *inside* `init_ArchRouter()`, never at module top
+  level, so importing `selection.py` (and therefore `apps.md.views`, and
+  therefore the whole URL conf) does not require torch to be installed.
 
 **Routing policies are nested** under a project
 (`/api/projects/{project_pk}/routing-policies/`). DRF routers don't nest, so

@@ -192,14 +192,15 @@ paths:
         Resolves the markdown to its owning project, then picks a single policy
         out of that project's policies. There is no direct markdown-to-policy
         link — the choice is made by `select_policy` in
-        `apps/routing/selection.py`. Returns 404 if the markdown does not exist
-        or its project has no policies.
+        `apps/routing/selection.py`, which routes the markdown text against the
+        policy descriptions using a local LLM. Returns 404 if the markdown does
+        not exist, its project has no policies, or no policy matches.
       responses:
         '200':
-          description: The selected routing policy
+          description: The selected routing policy (name and description only)
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RoutingPolicy' }
+              schema: { $ref: '#/components/schemas/SelectedPolicy' }
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -451,6 +452,15 @@ components:
           type: string
           format: date-time
           readOnly: true
+
+    SelectedPolicy:
+      type: object
+      description: Trimmed policy returned by the markdown routing lookup.
+      properties:
+        name:
+          type: string
+        description:
+          type: string
 
     RoutingPolicyCreate:
       type: object

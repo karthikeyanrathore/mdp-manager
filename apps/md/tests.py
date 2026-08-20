@@ -17,6 +17,14 @@ def _fake_embed_texts(texts):
     return [[float(len(t))] * 384 for t in texts]
 
 
+# Fake router so tests don't download / run Arch-Router-1.5B. Mirrors the real
+# select_policy contract: same (statement, policies) signature, returns one
+# policy or None. Deterministic rule: newest policy (RoutingPolicy is ordered
+# -created_at) so the choice can be asserted on.
+def _fake_select_policy(statement, policies):
+    return policies.first()
+
+
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
 class MarkdownApiTests(APITestCase):
     def setUp(self):
@@ -84,6 +92,13 @@ class MarkdownRoutingPolicyTests(APITestCase):
         )
         self.url = f"/api/markdowns/{self.markdown.id}/routing-policy/"
 
+        # Every test here hits the routing-policy endpoint, so the router is
+        # faked for the whole class — the real select_policy downloads
+        # Arch-Router-1.5B and runs inference.
+        patcher = patch("apps.md.views.select_policy", side_effect=_fake_select_policy)
+        self.mock_select_policy = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_policy(self, name, created_at, project=None):
         policy = RoutingPolicy.objects.create(
             project=project or self.project, name=name
@@ -99,7 +114,8 @@ class MarkdownRoutingPolicyTests(APITestCase):
         resp = self.client.get(self.url)
         assert resp.status_code == 200, resp.content
         assert resp.data["name"] == "only"
-        assert resp.data["project"] == self.project.id
+        # PolicySerializer exposes name + description only.
+        assert set(resp.data) == {"name", "description"}
         # A single object, not paginated.
         assert "results" not in resp.data
         assert "count" not in resp.data
@@ -110,8 +126,18 @@ class MarkdownRoutingPolicyTests(APITestCase):
 
         resp = self.client.get(self.url)
         assert resp.status_code == 200, resp.content
-        # Current placeholder rule in apps/routing/selection.py: newest wins.
+        # Rule of the fake router in this module: newest wins.
         assert resp.data["name"] == "newer"
+
+    def test_router_is_called_with_the_markdown_text_and_project_policies(self):
+        self.make_policy("only", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+        self.client.get(self.url)
+
+        self.mock_select_policy.assert_called_once()
+        statement, policies = self.mock_select_policy.call_args.args
+        assert statement == self.markdown.text
+        assert list(policies.values_list("name", flat=True)) == ["only"]
 
     def test_never_selects_a_policy_from_another_project(self):
         other = Project.objects.create(name="proj-other")

@@ -31,7 +31,6 @@ Based on your analysis, provide your response in the following JSON formats if y
 {"route": "route_name"} 
 """
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from apps.routing.serializers import PolicySerializer
 from rest_framework.exceptions import NotFound
 from .models import RoutingPolicy
@@ -48,6 +47,11 @@ def format_prompt(route_config, conversation):
 
 
 def init_ArchRouter():
+    # Imported here, not at module level, so merely importing this module stays
+    # cheap and does not require transformers/torch to be installed — same
+    # pattern as apps/md/embedder.py.
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     model_name = "katanemo/Arch-Router-1.5B"
     model = AutoModelForCausalLM.from_pretrained(
         model_name, device_map="auto", torch_dtype="auto", trust_remote_code=True
