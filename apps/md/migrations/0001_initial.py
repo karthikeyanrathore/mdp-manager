@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="chunks",
-                        to="embeddings.markdown",
+                        to="md.markdown",
                     ),
                 ),
             ],

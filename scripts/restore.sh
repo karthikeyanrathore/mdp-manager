@@ -56,4 +56,4 @@ echo "restoring $BACKUP_FILE -> $DB_NAME ..."
 
 echo "restore complete. Smoke check:"
 docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" \
-  -c "SELECT count(*) AS chunks FROM embeddings_chunk;"
+  -c "SELECT count(*) AS markdowns FROM md_markdown;"
