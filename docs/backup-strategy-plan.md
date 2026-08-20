@@ -94,7 +94,7 @@ container → `pg_restore` → rebuild/verify HNSW → repoint the app.
 - **RTO estimate:** dominated by data load + HNSW rebuild; record the measured time
   from the first drill and keep it in `docs/backup.md`.
 - **Fallback for a total loss with only source data:** restore the schema + the
-  `embeddings_markdown` rows (source text) and **re-run embedding** via the Celery
+  `md_markdown` rows (source text) and **re-run embedding** via the Celery
   `embed_markdown` task per document — slower but needs no vector backup.
 
 ## Verification & drills

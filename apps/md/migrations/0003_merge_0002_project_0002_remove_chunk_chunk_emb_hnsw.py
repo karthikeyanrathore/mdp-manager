@@ -6,8 +6,8 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("embeddings", "0002_project"),
-        ("embeddings", "0002_remove_chunk_chunk_emb_hnsw"),
+        ("md", "0002_project"),
+        ("md", "0002_remove_chunk_chunk_emb_hnsw"),
     ]
 
     operations = []

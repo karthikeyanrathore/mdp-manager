@@ -5,8 +5,8 @@ from django.db import migrations, models
 
 
 def assign_default_project(apps, schema_editor):
-    Project = apps.get_model("embeddings", "Project")
-    Markdown = apps.get_model("embeddings", "Markdown")
+    Project = apps.get_model("md", "Project")
+    Markdown = apps.get_model("md", "Markdown")
     orphans = Markdown.objects.filter(project__isnull=True)
     if orphans.exists():
         default, _ = Project.objects.get_or_create(name="Default")
@@ -15,7 +15,7 @@ def assign_default_project(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("embeddings", "0001_initial"),
+        ("md", "0001_initial"),
     ]
 
     operations = [
@@ -43,7 +43,7 @@ class Migration(migrations.Migration):
                 null=True,
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="markdowns",
-                to="embeddings.project",
+                to="md.project",
             ),
         ),
         migrations.RunPython(assign_default_project, migrations.RunPython.noop),
@@ -53,7 +53,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="markdowns",
-                to="embeddings.project",
+                to="md.project",
             ),
         ),
     ]

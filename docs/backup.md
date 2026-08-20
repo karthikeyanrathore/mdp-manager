@@ -80,9 +80,8 @@ scripts/restore.sh ./backups/daily/vec-....sql.gz vec
 The script verifies the checksum + gzip integrity, then pipes the SQL into the
 `postgres` container. Dumps are made with `--clean --if-exists`, so this DROPs and
 recreates objects. Restore **into a pgvector image** — the dump runs
-`CREATE EXTENSION IF NOT EXISTS vector`, and the HNSW index on
-`embeddings_chunk.embedding` is rebuilt as part of restore (the slow step for
-large tables).
+`CREATE EXTENSION IF NOT EXISTS vector` before recreating
+`md_markdown.embedding`.
 
 An off-site copy is `.age`-encrypted; decrypt before restoring:
 ```bash
@@ -90,7 +89,7 @@ age -d -i /secure/age.key vec-....sql.gz.age > vec-....sql.gz
 ```
 
 **Total-loss fallback (no vector backup):** restore only schema + the
-`embeddings_markdown` rows (source text) and re-embed by calling the Celery
+`md_markdown` rows (source text) and re-embed by calling the Celery
 `embed_markdown` task per document — slower, but needs no vector data.
 
 ## Verification & drills
@@ -98,7 +97,7 @@ age -d -i /secure/age.key vec-....sql.gz.age > vec-....sql.gz
 - **Every dump:** the off-site step writes a `.sha256`; `restore.sh` checks it and
   `gzip -t` before restoring.
 - **Monthly drill:** restore the latest dump into a throwaway DB and run smoke
-  checks — `SELECT count(*) FROM embeddings_chunk;` plus one similarity query
+  checks — `SELECT count(*) FROM md_markdown;` plus one similarity query
   (`ORDER BY embedding <=> :vec LIMIT 5`). Record the elapsed time here as the RTO
   baseline. Log each drill (date / dump / result / duration) below.
 

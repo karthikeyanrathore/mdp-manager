@@ -1,9 +1,8 @@
 # markdown-manager
 
-A Django REST Framework service that ingests text, splits it into overlapping
-chunks, embeds each chunk with a local model, and stores the vectors in Postgres
-(`pgvector`) for semantic similarity search. Embedding runs asynchronously via
-Celery + Redis.
+A Django REST Framework service that ingests text, embeds each document with a
+local model, and stores the vectors in Postgres (`pgvector`). Embedding runs
+asynchronously via Celery + Redis.
 
 ## Architecture
 
@@ -26,14 +25,13 @@ flowchart TD
 
     subgraph Worker["Celery worker: embed_markdown"]
         Proc["status = PROCESSING"]
-        Chunk["chunk_text()<br/>split into overlapping chunks"]
         Embed["embed_texts()<br/>SentenceTransformer<br/>all-MiniLM-L6-v2 → 384-dim"]
-        Save["bulk_create Chunk rows<br/>(text + embedding)"]
+        Save["save Markdown.embedding"]
         Done["status = DONE"]
         Fail["status = FAILED<br/>retry (max 3)"]
     end
 
-    DB[("Postgres + pgvector<br/>embeddings_chunk<br/>vector(384) + HNSW index")]
+    DB[("Postgres + pgvector<br/>md_markdown<br/>vector(384)")]
 
     Client --> JSON
     Client --> Upload
@@ -44,12 +42,27 @@ flowchart TD
     Resp202 --> Client
     Enqueue -. task .-> Broker
     Broker -. consume .-> Proc
-    Proc --> Chunk --> Embed --> Save --> Done
+    Proc --> Embed --> Save --> Done
     Save -. on error .-> Fail
     Save --> DB
 
     Client -. "GET /api/markdowns/{id}/ (poll status)" .-> API
 ```
+
+## Layout
+
+Django apps live under `apps/`:
+
+```
+apps/core/       Project — the umbrella both other apps hang off
+apps/md/         markdown ingest + embedding
+apps/routing/    routing policy CRUD
+config/          settings, urls, celery
+```
+
+A **project** owns both its markdown documents and its routing policies; deleting
+one cascades to both. Apps are referenced by dotted path (`apps.core`, `apps.md`,
+`apps.routing`), and their Django labels are `core` / `md` / `routing`.
 
 ## Setup
 
@@ -89,7 +102,7 @@ celery -A config worker -l info
 
 ## API
 
-Markdown is grouped into **projects**; ingest and search are scoped per project.
+Markdown is grouped into **projects**; ingest is scoped per project.
 
 | Method | Path                        | Description                                    |
 |--------|-----------------------------|------------------------------------------------|
@@ -97,13 +110,24 @@ Markdown is grouped into **projects**; ingest and search are scoped per project.
 | GET/PUT/DELETE | `/api/projects/{id}/` | Retrieve / update / delete a project          |
 | POST   | `/api/markdowns/`           | Submit `{project, title?, text}`; returns `202` + id + `PENDING`; embedding is enqueued |
 | POST   | `/api/markdowns/upload/`    | Upload a `.md` file (multipart `file` + `project`); filename becomes the title |
-| GET    | `/api/markdowns/{id}/`      | Markdown status + `chunk_count`                |
-| GET    | `/api/markdowns/{id}/chunks/` | Paginated chunks for a markdown              |
-| POST   | `/api/search/`              | `{query, project, top_k?}` → top-k chunks in that project by cosine distance |
+| GET    | `/api/markdowns/{id}/`      | Markdown status                                |
+| GET    | `/api/markdowns/{id}/routing-policy/` | The one routing policy that applies to that markdown |
+| GET    | `/api/projects/{id}/`       | Project + `markdown_count` / `routing_policy_count` |
+
+**Routing policies** are scoped to a project and nested under it:
+
+| Method | Path                        | Description                                    |
+|--------|-----------------------------|------------------------------------------------|
+| GET/POST | `/api/projects/{project_id}/routing-policies/` | List / create policies (`{name, description?}`) |
+| GET/PUT/PATCH/DELETE | `/api/projects/{project_id}/routing-policies/{id}/` | Retrieve / update / delete a policy |
+
+`name` is required and unique **within its project** (two projects can each have a
+`default`); `description` is optional. The owning project comes from the URL, not
+the body — an unknown `project_id` is a `404`.
 
 ### Admin
 
-Projects (and markdowns/chunks) can also be managed in the Django admin:
+Projects (and markdowns) can also be managed in the Django admin:
 
 ```bash
 python manage.py migrate
@@ -167,24 +191,23 @@ curl -X POST localhost:8000/api/markdowns/upload/ \
 
 # Poll (until status == DONE)
 curl localhost:8000/api/markdowns/<id>/
-
-# Search (scoped to the project)
-curl -X POST localhost:8000/api/search/ \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"what is the color of bike?","project":"<project_id>","top_k":3}'
 ```
 
 ## Tests
 
 ```bash
-# Chunking tests run without infra. The API/search tests need the Postgres
-# (pgvector) database from docker-compose and run the embedding task eagerly.
+# The API tests need the Postgres (pgvector) database from docker-compose
+# and run the embedding task eagerly.
 python manage.py test
 ```
 
 ## Notes
 
 - Embedding dimension (384) is pinned to `all-MiniLM-L6-v2`. Changing the model
-  (`EMBEDDING_MODEL_NAME`) means a new migration + re-embedding existing chunks.
+  (`EMBEDDING_MODEL_NAME`) means a new migration + re-embedding existing
+  markdowns.
+- Each markdown is embedded as a **single** vector over its full text. The model
+  truncates input at 256 word-pieces, so only the opening of a long document
+  contributes to its embedding.
 - v1 accepts raw text only — no auth, file upload, or PDF parsing.
 

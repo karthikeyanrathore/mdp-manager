@@ -3,9 +3,9 @@ info:
   title: markdown-manager API
   version: 1.0.0
   description: >
-    Ingest markdown/text, chunk it, embed each chunk with a local model, and
-    search stored chunks by vector similarity. Embedding runs asynchronously,
-    so ingest endpoints return 202 and the resource starts in PENDING status.
+    Ingest markdown/text and embed each document with a local model. Embedding
+    runs asynchronously, so ingest endpoints return 202 and the resource starts
+    in PENDING status.
 
 servers:
   - url: http://localhost:8000
@@ -13,11 +13,11 @@ servers:
 
 tags:
   - name: projects
-    description: Group markdown into projects; ingest/search are scoped per project
+    description: Group markdown into projects; ingest is scoped per project
   - name: markdowns
     description: Ingest and inspect markdown documents
-  - name: search
-    description: Semantic similarity search over chunks
+  - name: routing
+    description: Manage a project's routing policies
 
 paths:
   /api/projects/:
@@ -88,7 +88,7 @@ paths:
           $ref: '#/components/responses/ValidationError'
     delete:
       tags: [projects]
-      summary: Delete a project (cascades to its markdowns and chunks)
+      summary: Delete a project (cascades to its markdowns and routing policies)
       responses:
         '204':
           description: Deleted
@@ -175,23 +175,45 @@ paths:
       summary: Retrieve a markdown
       responses:
         '200':
-          description: The markdown, including current status and chunk count
+          description: The markdown, including current status
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Markdown' }
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/markdowns/{id}/chunks/:
+  /api/markdowns/{id}/routing-policy/:
     parameters:
       - $ref: '#/components/parameters/MarkdownId'
-      - $ref: '#/components/parameters/Page'
     get:
       tags: [markdowns]
-      summary: List a markdown's chunks
+      summary: Get the routing policy that applies to this markdown
+      description: >
+        Resolves the markdown to its owning project, then picks a single policy
+        out of that project's policies. There is no direct markdown-to-policy
+        link — the choice is made by `select_policy` in
+        `apps/routing/selection.py`. Returns 404 if the markdown does not exist
+        or its project has no policies.
       responses:
         '200':
-          description: Paginated list of chunks
+          description: The selected routing policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutingPolicy' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/projects/{project_id}/routing-policies/:
+    parameters:
+      - $ref: '#/components/parameters/ProjectPathId'
+    get:
+      tags: [routing]
+      summary: List a project's routing policies
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated list of routing policies (newest first)
           content:
             application/json:
               schema:
@@ -201,33 +223,102 @@ paths:
                     properties:
                       results:
                         type: array
-                        items: { $ref: '#/components/schemas/Chunk' }
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/search/:
+                        items: { $ref: '#/components/schemas/RoutingPolicy' }
     post:
-      tags: [search]
-      summary: Semantic search
-      description: Embeds the query and returns the top-k most similar chunks.
+      tags: [routing]
+      summary: Create a routing policy
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/SearchRequest' }
+            schema: { $ref: '#/components/schemas/RoutingPolicyCreate' }
       responses:
-        '200':
-          description: Ranked chunks (ascending cosine distance)
+        '201':
+          description: Created
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/SearchResult' }
+              schema: { $ref: '#/components/schemas/RoutingPolicy' }
         '400':
           $ref: '#/components/responses/ValidationError'
 
+  /api/projects/{project_id}/routing-policies/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/ProjectPathId'
+      - $ref: '#/components/parameters/RoutingPolicyId'
+    get:
+      tags: [routing]
+      summary: Retrieve a routing policy
+      responses:
+        '200':
+          description: The routing policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutingPolicy' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [routing]
+      summary: Replace a routing policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutingPolicyCreate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutingPolicy' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [routing]
+      summary: Partially update a routing policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutingPolicyCreate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutingPolicy' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [routing]
+      summary: Delete a routing policy
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   parameters:
+    RoutingPolicyId:
+      name: id
+      in: path
+      required: true
+      description: Routing policy UUID
+      schema:
+        type: string
+        format: uuid
+    ProjectPathId:
+      name: project_id
+      in: path
+      required: true
+      description: UUID of the owning project; an unknown id is a 404
+      schema:
+        type: string
+        format: uuid
     MarkdownId:
       name: id
       in: path
@@ -283,6 +374,9 @@ components:
         markdown_count:
           type: integer
           readOnly: true
+        routing_policy_count:
+          type: integer
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -318,9 +412,6 @@ components:
         error:
           type: string
           readOnly: true
-        chunk_count:
-          type: integer
-          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -338,43 +429,38 @@ components:
         text:
           type: string
 
-    Chunk:
+    RoutingPolicy:
       type: object
       properties:
-        index:
-          type: integer
-        text:
+        id:
           type: string
-
-    SearchRequest:
-      type: object
-      required: [query, project]
-      properties:
-        query:
-          type: string
+          format: uuid
+          readOnly: true
         project:
           type: string
           format: uuid
-          description: Only chunks in this project are searched
-        top_k:
-          type: integer
-          default: 5
-          minimum: 1
-          maximum: 100
+          readOnly: true
+          description: Taken from the URL, not the request body
+        name:
+          type: string
+          maxLength: 255
+          description: Unique within its project
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
 
-    SearchResult:
+    RoutingPolicyCreate:
       type: object
+      required: [name]
       properties:
-        markdown_id:
+        name:
           type: string
-          format: uuid
-        index:
-          type: integer
-        text:
+          maxLength: 255
+        description:
           type: string
-        distance:
-          type: number
-          format: float
 
     PaginatedResponse:
       type: object
