@@ -24,7 +24,7 @@ class MarkdownViewSet(
     serializer_class = MarkdownSerializer
 
     def create(self, request, *args, **kwargs):
-        skip_embed = request.query_params.get("skip_embed", "true")
+        skip_embed = request.query_params.get("skip_embed", "false")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         markdown = serializer.save()
