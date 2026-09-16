@@ -3,8 +3,7 @@
 Manager serves as a routing manager for routing  messages aka "markdown" to respective policies.
 It also serves as embedding manager to embed text which later can be used for semantic search.
 
-model used: katanemo/Arch-Router-1.5B
-model size: 2.9GB
+model used: katanemo/Arch-Router-1.5B & model size: 2.9GB
 
 read more about Arch Router in paper: https://arxiv.org/abs/2506.16655
 
@@ -30,6 +29,6 @@ celery -A config worker -l info
 ```
 
 
-## Uni Message example
+## Uni message example
 
 TBD
