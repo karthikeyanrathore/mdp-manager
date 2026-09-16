@@ -27,3 +27,35 @@ class Markdown(models.Model):
 
     def __str__(self):
         return f"{self.title or self.id} ({self.status})"
+
+
+class PolicySelection(models.Model):
+    """The routing policy `select_policy` picked for a markdown.
+
+    One row per markdown: the router is a local 1.5 B model and inference is
+    slow, so the answer is cached instead of recomputed on every request.
+
+    `policy` is NULL when no policy applied — the project has none, or the
+    router answered `other` — and `error` records which. A failure is cached
+    too, so a rejected markdown does not re-run inference on every poll.
+
+    Deleting the chosen policy drops the row, so the next request re-runs the
+    router against the policies that remain.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    markdown = models.OneToOneField(
+        Markdown, related_name="policy_selection", on_delete=models.CASCADE
+    )
+    policy = models.ForeignKey(
+        "routing.RoutingPolicy",
+        related_name="selections",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.markdown_id} -> {self.policy or 'none'}"

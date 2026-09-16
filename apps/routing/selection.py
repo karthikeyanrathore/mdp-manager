@@ -47,15 +47,15 @@ def format_prompt(route_config, conversation):
 
 
 def init_ArchRouter():
-    # Imported here, not at module level, so merely importing this module stays
-    # cheap and does not require transformers/torch to be installed — same
-    # pattern as apps/md/embedder.py.
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     model_name = "katanemo/Arch-Router-1.5B"
     model = AutoModelForCausalLM.from_pretrained(
         model_name, device_map="auto", torch_dtype="auto", trust_remote_code=True
     )
+    print(f"model_name: {model_name}")
+    print(f"{model.get_memory_footprint() / 1024**2 : .1f} MB")
+    print(f"{model.num_parameters() / 1e6:.1f} M parameters")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     return model, tokenizer
 
@@ -81,6 +81,7 @@ def select_policy(statement, policies):
         messages, add_generation_prompt=True, return_tensors="pt"
     ).to(model.device)
 
+    print("Ok, selecting policies.")
     # inference is slow!!
     generate_ids = model.generate(input_ids=input_ids, max_new_tokens=32768)
     pl = input_ids.shape[1]

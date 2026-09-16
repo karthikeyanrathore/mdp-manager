@@ -39,6 +39,9 @@ htmlcov/
 # Backups (local dumps live here; never commit them)
 /backups/
 
+# Chat exports fed to mdp-example/run.py (personal data; large)
+mdp-example/*.txt
+
 # Editors / OS
 .DS_Store
 .idea/
