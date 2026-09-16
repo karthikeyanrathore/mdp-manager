@@ -24,10 +24,11 @@ class MarkdownViewSet(
     serializer_class = MarkdownSerializer
 
     def create(self, request, *args, **kwargs):
-        skip_embed = request.query_params.get("skip_embed", "false")
+        skip_embed = bool(request.query_params.get("skip_embed", 0))
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         markdown = serializer.save()
+        print("check", skip_embed)
         if skip_embed:
             print("Ok, skipping embedding.")
             markdown = Markdown.objects.get(pk=markdown.id)
@@ -35,6 +36,7 @@ class MarkdownViewSet(
             markdown.error = ""
             markdown.save(update_fields=["status", "error"])
         else:
+            print("Ok, embed model initiated")
             embed_markdown.delay(str(markdown.id))
         headers = self.get_success_headers(serializer.data)
         return Response(

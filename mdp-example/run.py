@@ -136,11 +136,11 @@ if __name__ == "__main__":
         Does anybody know the time and place for BCI?
     """
     markdown_1 = post(
-        "/markdowns/?skip_embed=true/",
+        "/markdowns/?skip_embed=1/",
         {
             "project": project_id,
             "title": "message 1, Author Name: X",
-            "text": msg3,
+            "text": msg_3,
         },
     )
 
