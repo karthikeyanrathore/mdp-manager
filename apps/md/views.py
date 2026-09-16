@@ -9,7 +9,7 @@ from apps.routing.models import RoutingPolicy
 from apps.routing.selection import select_policy
 from apps.routing.serializers import RoutingPolicySerializer, PolicySerializer
 
-from .models import Markdown
+from .models import Markdown, PolicySelection
 from .serializers import MarkdownSerializer
 from .tasks import embed_markdown
 
@@ -24,10 +24,18 @@ class MarkdownViewSet(
     serializer_class = MarkdownSerializer
 
     def create(self, request, *args, **kwargs):
+        skip_embed = request.query_params.get("skip_embed", "true")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         markdown = serializer.save()
-        embed_markdown.delay(str(markdown.id))
+        if skip_embed:
+            print("Ok, skipping embedding.")
+            markdown = Markdown.objects.get(pk=markdown.id)
+            markdown.status = Markdown.Status.DONE
+            markdown.error = ""
+            markdown.save(update_fields=["status", "error"])
+        else:
+            embed_markdown.delay(str(markdown.id))
         headers = self.get_success_headers(serializer.data)
         return Response(
             serializer.data, status=status.HTTP_202_ACCEPTED, headers=headers
@@ -68,13 +76,40 @@ class MarkdownViewSet(
         There is no direct markdown → policy link; policies are owned by the
         project. So this resolves markdown → project → policies and lets
         `select_policy` pick which one of them applies.
+
+        The answer is cached in `PolicySelection` — one row per markdown — so
+        the router only runs the first time it is asked about a markdown.
         """
         markdown = self.get_object()
+        print(f"markdown:{markdown.id}")
+        selection = PolicySelection.objects.filter(markdown=markdown).first()
+        print(f"selection:{selection}")
+        if selection is None:
+            selection = self._select_and_store(markdown)
+        if selection.policy is None:
+            raise NotFound(selection.error)
+        return Response(PolicySerializer(selection.policy).data)
+
+    def _select_and_store(self, markdown):
+        """Run the router once and record what it decided.
+
+        Failures are stored too (``policy=None``), so an unroutable markdown
+        does not pay for inference again on the next request.
+        """
         policies = RoutingPolicy.objects.filter(project=markdown.project_id)
-        policy = select_policy(markdown.text, policies)
-        if policy is None:
-            raise NotFound("This markdown's project has no routing policies.")
-        return Response(PolicySerializer(policy).data)
+        try:
+            policy = select_policy(markdown.text, policies)
+        except NotFound as exc:
+            policy, error = None, str(exc.detail)
+        else:
+            error = (
+                ""
+                if policy is not None
+                else "This markdown's project has no routing policies."
+            )
+        return PolicySelection.objects.create(
+            markdown=markdown, policy=policy, error=error
+        )
 
 
 class ClusterView(APIView):

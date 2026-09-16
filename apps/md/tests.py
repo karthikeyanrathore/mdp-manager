@@ -4,12 +4,13 @@ from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from rest_framework.exceptions import NotFound
 from rest_framework.test import APITestCase
 
 from apps.core.models import Project
 from apps.routing.models import RoutingPolicy
 
-from .models import Markdown
+from .models import Markdown, PolicySelection
 
 
 # Fake embedder so tests don't download / run the real model.
@@ -73,6 +74,52 @@ class MarkdownApiTests(APITestCase):
         assert doc.project_id == self.project.id
         assert doc.status == Markdown.Status.DONE
         assert doc.embedding is not None
+
+    def test_duplicate_text_returns_the_existing_markdown(self):
+        first = Markdown.objects.create(
+            project=self.project, title="first", text="same body"
+        )
+
+        resp = self.client.post(
+            "/api/markdowns/",
+            {"project": str(self.project.id), "title": "second", "text": "same body"},
+            format="json",
+        )
+        assert resp.status_code == 202, resp.content
+        # The id of the row that already held this text, not a new one.
+        assert resp.data["id"] == str(first.id)
+        assert Markdown.objects.filter(text="same body").count() == 1
+        # The stored row keeps its own title; the duplicate POST does not
+        # overwrite it.
+        first.refresh_from_db()
+        assert first.title == "first"
+
+    def test_same_text_in_another_project_is_allowed(self):
+        other = Project.objects.create(name="proj-other")
+        Markdown.objects.create(project=other, title="theirs", text="same body")
+
+        resp = self.client.post(
+            "/api/markdowns/",
+            {"project": str(self.project.id), "title": "mine", "text": "same body"},
+            format="json",
+        )
+        assert resp.status_code == 202, resp.content
+        assert Markdown.objects.filter(text="same body").count() == 2
+
+    def test_upload_returns_the_existing_markdown(self):
+        existing = Markdown.objects.create(
+            project=self.project, title="note.md", text="body"
+        )
+
+        upload = SimpleUploadedFile("note.md", b"body", content_type="text/markdown")
+        resp = self.client.post(
+            "/api/markdowns/upload/",
+            {"file": upload, "project": str(self.project.id)},
+            format="multipart",
+        )
+        assert resp.status_code == 202, resp.content
+        assert resp.data["id"] == str(existing.id)
+        assert Markdown.objects.filter(text="body").count() == 1
 
     def test_upload_rejects_non_md(self):
         upload = SimpleUploadedFile("note.txt", b"plain", content_type="text/plain")
@@ -158,3 +205,65 @@ class MarkdownRoutingPolicyTests(APITestCase):
     def test_unknown_markdown_is_404(self):
         resp = self.client.get(f"/api/markdowns/{uuid.uuid4()}/routing-policy/")
         assert resp.status_code == 404
+
+    def test_selection_is_stored(self):
+        policy = self.make_policy("only", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+        self.client.get(self.url)
+
+        selection = PolicySelection.objects.get(markdown=self.markdown)
+        assert selection.policy_id == policy.id
+        assert selection.error == ""
+
+    def test_second_request_is_served_from_the_stored_selection(self):
+        self.make_policy("only", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+        first = self.client.get(self.url)
+        second = self.client.get(self.url)
+
+        assert first.data == second.data == {"name": "only", "description": ""}
+        # The router is slow, so it must not run again for the same markdown.
+        self.mock_select_policy.assert_called_once()
+        assert PolicySelection.objects.filter(markdown=self.markdown).count() == 1
+
+    def test_failed_selection_is_stored_and_cached(self):
+        # No policies, so the fake router returns None and the view 404s.
+        first = self.client.get(self.url)
+        second = self.client.get(self.url)
+
+        assert first.status_code == second.status_code == 404
+        selection = PolicySelection.objects.get(markdown=self.markdown)
+        assert selection.policy is None
+        assert selection.error
+        self.mock_select_policy.assert_called_once()
+
+    def test_router_not_found_is_stored_with_its_reason(self):
+        self.make_policy("only", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self.mock_select_policy.side_effect = NotFound("nope")
+
+        resp = self.client.get(self.url)
+
+        assert resp.status_code == 404
+        selection = PolicySelection.objects.get(markdown=self.markdown)
+        assert selection.policy is None
+        assert selection.error == "nope"
+
+    def test_deleting_the_policy_drops_the_stored_selection(self):
+        policy = self.make_policy("only", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self.client.get(self.url)
+
+        policy.delete()
+
+        assert not PolicySelection.objects.filter(markdown=self.markdown).exists()
+
+    def test_selections_are_per_markdown(self):
+        self.make_policy("only", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        other = Markdown.objects.create(
+            project=self.project, title="other", text="other body"
+        )
+
+        self.client.get(self.url)
+        self.client.get(f"/api/markdowns/{other.id}/routing-policy/")
+
+        assert PolicySelection.objects.count() == 2
+        assert self.mock_select_policy.call_count == 2
